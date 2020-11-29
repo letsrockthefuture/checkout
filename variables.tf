@@ -15,7 +15,7 @@ variable "app" {
 
 variable "app_version" {
   type    = string
-  default = "v1"
+  default = "v2"
 }
 
 variable "zone" {
@@ -30,6 +30,6 @@ variable "docker_image" {
 }
 
 variable "container_port" {
-  type    = string
-  default = "35251"
+  type    = number
+  default = "80"
 }

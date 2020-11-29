@@ -6,7 +6,7 @@ locals {
   container_port = var.container_port
 }
 
-resource "kubernetes_namespace" "checkout_namespace" {
+/* resource "kubernetes_namespace" "checkout_namespace" {
   metadata {
     annotations = {
       name            = local.namespace
@@ -18,6 +18,16 @@ resource "kubernetes_namespace" "checkout_namespace" {
     }
 
     name = local.namespace
+  }
+} */
+
+resource "kubernetes_service_account" "checkout_service_account" {
+  metadata {
+    name      = local.app
+    namespace = local.namespace
+    labels = {
+      app = local.app
+    }
   }
 }
 
@@ -46,6 +56,7 @@ resource "kubernetes_deployment" "checkout_deployment" {
         }
       }
       spec {
+        service_account_name = local.app
         container {
           image = local.docker_image
           name  = local.app
@@ -75,18 +86,44 @@ resource "kubernetes_deployment" "checkout_deployment" {
             period_seconds        = 3
           }
         }
+        node_selector = {
+          "app" = local.app
+        }
       }
+    }
+  }
+}
+
+resource "kubernetes_service" "checkout_private_service" {
+  metadata {
+    name      = local.app
+    namespace = local.namespace
+
+    labels = {
+      app = local.app
+    }
+  }
+
+  spec {
+    selector = {
+      app = kubernetes_deployment.checkout_deployment.metadata.0.labels.app
+    }
+
+    type = "ClusterIP"
+
+    port {
+      port = local.container_port
     }
   }
 
   depends_on = [
-    kubernetes_namespace.checkout_namespace
+    kubernetes_deployment.checkout_deployment
   ]
 }
 
-resource "kubernetes_service" "checkout_service" {
+resource "kubernetes_service" "checkout_public_service" {
   metadata {
-    name      = local.app
+    name      = "${local.app}-public"
     namespace = local.namespace
 
     labels = {
@@ -107,7 +144,6 @@ resource "kubernetes_service" "checkout_service" {
   }
 
   depends_on = [
-    kubernetes_namespace.checkout_namespace,
     kubernetes_deployment.checkout_deployment
   ]
 }
@@ -140,6 +176,12 @@ resource "kubernetes_manifest" "checkout_gateway" {
       ]
     }
   }
+
+  depends_on = [
+    kubernetes_deployment.checkout_deployment,
+    kubernetes_service.checkout_private_service,
+    kubernetes_service.checkout_public_service
+  ]
 }
 
 resource "kubernetes_manifest" "checkout_virtual_service" {
@@ -149,37 +191,46 @@ resource "kubernetes_manifest" "checkout_virtual_service" {
     "apiVersion" = "networking.istio.io/v1alpha3"
     "kind"       = "VirtualService"
     "metadata" = {
-      "name" = local.app
+      "name"      = local.app
+      "namespace" = local.namespace
     }
     "spec" = {
       "gateways" = [
-        "${local.app}-gateway",
+        "${local.app}-gateway"
       ]
       "hosts" = [
         "*"
       ]
       "http" = [
         {
+          "match" = [
+            {
+              "uri" = {
+                "exact" = "/checkout"
+              }
+            }
+          ]
           "route" = [
             {
               "destination" = {
-                "host"   = local.app
-                "subset" = local.version
+                "host" = local.app
+                "port" = {
+                  "number" = local.container_port
+                }
               }
-              "weight" = 75
-            },
-            {
-              "destination" = {
-                "host"   = local.app
-                "subset" = "v2"
-              }
-              "weight" = 25
             }
           ]
         }
       ]
     }
   }
+
+  depends_on = [
+    kubernetes_deployment.checkout_deployment,
+    kubernetes_service.checkout_private_service,
+    kubernetes_service.checkout_public_service,
+    kubernetes_manifest.checkout_gateway
+  ]
 }
 
 resource "kubernetes_manifest" "checkout_destination_rule" {
@@ -196,13 +247,13 @@ resource "kubernetes_manifest" "checkout_destination_rule" {
       "host" = local.app
       "subsets" = [
         {
-          "name" = "monolith"
+          "name" = "v1"
           "labels" = {
-            "version" = "v1"
+            "version" = "v2"
           }
         },
         {
-          "name" = local.app
+          "name" = local.version
           "labels" = {
             "version" = local.version
           }
@@ -210,4 +261,12 @@ resource "kubernetes_manifest" "checkout_destination_rule" {
       ]
     }
   }
+
+  depends_on = [
+    kubernetes_deployment.checkout_deployment,
+    kubernetes_service.checkout_private_service,
+    kubernetes_service.checkout_public_service,
+    kubernetes_manifest.checkout_gateway,
+    kubernetes_manifest.checkout_virtual_service
+  ]
 }
