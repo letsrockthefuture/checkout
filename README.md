@@ -1,4 +1,4 @@
-# Checkout (5rd)
+# Checkout (5th)
 
 Checkout is the new microservice that will handle the /checkout of our friend Monolith, and that was developed following the infrastructure standard as code using Terraform.
 
