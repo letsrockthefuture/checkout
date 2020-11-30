@@ -1,34 +1,13 @@
 locals {
-  namespace      = var.namespace
-  app            = var.app
-  version        = var.app_version
-  docker_image   = var.docker_image
-  container_port = var.container_port
-}
-
-/* resource "kubernetes_namespace" "checkout_namespace" {
-  metadata {
-    annotations = {
-      name            = local.namespace
-      istio-injection = "enabled"
-    }
-
-    labels = {
-      app = local.app
-    }
-
-    name = local.namespace
-  }
-} */
-
-resource "kubernetes_service_account" "checkout_service_account" {
-  metadata {
-    name      = local.app
-    namespace = local.namespace
-    labels = {
-      app = local.app
-    }
-  }
+  app                        = var.app
+  namespace                  = var.namespace
+  version                    = var.app_version
+  replicas                   = var.replicas
+  docker_image               = var.docker_image
+  container_port             = var.container_port
+  weight_to_checkout_service = var.weight_to_checkout_service
+  monolith_service           = var.monolith_service
+  weight_to_monolith_service = var.weight_to_monolith_service
 }
 
 resource "kubernetes_deployment" "checkout_deployment" {
@@ -42,7 +21,7 @@ resource "kubernetes_deployment" "checkout_deployment" {
   }
 
   spec {
-    replicas = 1
+    replicas = local.replicas
     selector {
       match_labels = {
         app = local.app
@@ -56,24 +35,23 @@ resource "kubernetes_deployment" "checkout_deployment" {
         }
       }
       spec {
-        service_account_name = local.app
         container {
           image = local.docker_image
           name  = local.app
-          args  = ["-listen=:${local.container_port}", "-text=${local.app}"]
+          args  = ["-listen=:${local.container_port}", "-text=Service: ${local.app}.${local.app}.svc.cluster.local"]
 
           port {
             container_port = local.container_port
           }
 
           resources {
-            limits {
-              cpu    = "0.5"
-              memory = "512Mi"
-            }
             requests {
-              cpu    = "250m"
-              memory = "50Mi"
+              cpu    = "25m"
+              memory = "64Mi"
+            }
+            limits {
+              cpu    = "50m"
+              memory = "128Mi"
             }
           }
           liveness_probe {
@@ -196,31 +174,35 @@ resource "kubernetes_manifest" "checkout_virtual_service" {
     }
     "spec" = {
       "gateways" = [
-        "${local.app}-gateway"
+        "${local.app}-gateway",
       ]
       "hosts" = [
-        "*"
+        "*",
       ]
       "http" = [
         {
           "match" = [
             {
               "uri" = {
-                "exact" = "/checkout"
+                "exact" = "/${local.app}"
               }
-            }
+            },
           ]
           "route" = [
             {
               "destination" = {
                 "host" = local.app
-                "port" = {
-                  "number" = local.container_port
-                }
               }
+              "weight" = local.weight_to_checkout_service
+            },
+            {
+              "destination" = {
+                "host" = local.monolith_service
+              }
+              "weight" = local.weight_to_monolith_service
             }
           ]
-        }
+        },
       ]
     }
   }
@@ -230,43 +212,5 @@ resource "kubernetes_manifest" "checkout_virtual_service" {
     kubernetes_service.checkout_private_service,
     kubernetes_service.checkout_public_service,
     kubernetes_manifest.checkout_gateway
-  ]
-}
-
-resource "kubernetes_manifest" "checkout_destination_rule" {
-  provider = kubernetes-alpha
-
-  manifest = {
-    "apiVersion" = "networking.istio.io/v1alpha3"
-    "kind"       = "DestinationRule"
-    "metadata" = {
-      "name"      = local.app
-      "namespace" = local.namespace
-    }
-    "spec" = {
-      "host" = local.app
-      "subsets" = [
-        {
-          "name" = "v1"
-          "labels" = {
-            "version" = "v2"
-          }
-        },
-        {
-          "name" = local.version
-          "labels" = {
-            "version" = local.version
-          }
-        }
-      ]
-    }
-  }
-
-  depends_on = [
-    kubernetes_deployment.checkout_deployment,
-    kubernetes_service.checkout_private_service,
-    kubernetes_service.checkout_public_service,
-    kubernetes_manifest.checkout_gateway,
-    kubernetes_manifest.checkout_virtual_service
   ]
 }

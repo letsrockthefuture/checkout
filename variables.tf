@@ -3,24 +3,24 @@ variable "cluster_name" {
   default = "hash-challenge-kubernetes-engine"
 }
 
-variable "namespace" {
+variable "app" {
   type    = string
   default = "checkout"
 }
 
-variable "app" {
+variable "namespace" {
   type    = string
   default = "checkout"
 }
 
 variable "app_version" {
   type    = string
-  default = "v2"
+  default = "v1"
 }
 
-variable "zone" {
-  type    = string
-  default = "us-east1-b"
+variable "replicas" {
+  type    = number
+  default = "1"
 }
 
 variable "docker_image" {
@@ -32,4 +32,19 @@ variable "docker_image" {
 variable "container_port" {
   type    = number
   default = "80"
+}
+
+variable "monolith_service" {
+  type    = string
+  default = "monolith.monolith.svc.cluster.local"
+}
+
+variable "weight_to_checkout_service" {
+  type    = number
+  default = "5"
+}
+
+variable "weight_to_monolith_service" {
+  type    = number
+  default = "95"
 }
